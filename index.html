@@ -46,6 +46,9 @@
             <div id="bombText">BOMB 3</div>
           </div>
         </div>
+        <div id="radioStrip" class="radio-strip hidden" role="status" aria-live="polite" aria-atomic="true">
+          <strong id="radioSpeaker">ASTER · AI COPILOT</strong><span id="radioText"></span>
+        </div>
         <button id="touchBomb" class="touch-bomb hidden">BOMB</button>
         <button id="touchPause" class="touch-pause hidden">Ⅱ</button>
 
@@ -58,7 +61,7 @@
               이제 당신은 과거의 하늘과 바다를 지배하며 다섯 전장을 돌파해 <b>크로노 플래그십</b>을 완성해야 한다.
             </p>
             <div class="menu-grid">
-              <div><b>조작</b><span>이동: 방향키 / WASD · 폭탄: X/B · 일시정지: P/ESC</span></div>
+              <div><b>조작</b><span>마우스 이동: 버튼 없이 조종 · 왼쪽 클릭: 폭탄 · 자동 사격</span></div>
               <div><b>모바일</b><span>드래그 이동 · 우하단 BOMB 버튼 · 우상단 일시정지</span></div>
             </div>
             <div class="menu-actions">
@@ -74,6 +77,8 @@
             <div class="eyebrow">MISSION DATA</div>
             <h2>작전 설명</h2>
             <ul class="info-list">
+              <li>마우스를 게임 화면에 올려 이동합니다. 왼쪽 클릭은 폭탄, 사격은 자동입니다.</li>
+              <li>키보드: 방향키/WASD 이동 · X/B 폭탄 · P/ESC 일시정지. 터치는 드래그 이동입니다.</li>
               <li>총 5개 스테이지: 호송 해역 → 전쟁섬 → 군항 → 극지 → 사막 최종요새</li>
               <li>파란 아이템(P): 화력 상승 / 녹색 아이템: 폭탄 또는 수리 보급</li>
               <li>폭탄은 화면 적탄 제거 + 적 전체 피해를 준다.</li>
@@ -108,11 +113,20 @@
       </div>
       <div class="screen-footer">
         <span>HTML5 Canvas · WebP Assets · No External Dependencies</span>
-        <span>Version 2.2 — 2045 Edition</span>
+        <span>Version 2.3 — 2045 Edition</span>
       </div>
     </section>
 
     <aside class="side-panel">
+      <article class="panel-card boss-dossier">
+        <div class="eyebrow">LIVE ENEMY INTELLIGENCE</div>
+        <div class="boss-portrait"><img id="bossPortrait" src="assets/sprites/boss_1.webp" alt="철갑 제독" width="220" height="220"></div>
+        <h3 id="bossName">철갑 제독</h3>
+        <label for="bossHealth">보스 전력</label><progress id="bossHealth" max="100" value="100"></progress>
+        <p id="bossIntel"></p><blockquote id="bossDialogue">적 지휘부 감청 대기 중</blockquote>
+        <label for="missionProgress">전장 진행</label><progress id="missionProgress" max="100" value="0"></progress>
+        <p class="copilot-note">ASTER AI 코파일럿 · 전장 진입 / 보스 접근 / 피격 / 보급 상황 자동 안내</p>
+      </article>
       <article class="panel-card">
         <div class="eyebrow">STORY</div>
         <h3>2045 → 1945</h3>

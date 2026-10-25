@@ -22,3 +22,10 @@ jobs:
         run: |
           python3 -m http.server 8765 > /tmp/chrono-server.log 2>&1 &
           node tests/browser.cjs
+      - name: Upload browser captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrono-browser-captures
+          path: /tmp/chrono-*.png
+          if-no-files-found: ignore

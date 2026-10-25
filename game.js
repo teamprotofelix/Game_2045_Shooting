@@ -10,7 +10,10 @@
     loading: $('loadingText'), status: $('statusLine'),
     menu: $('menuOverlay'), help: $('helpOverlay'), pause: $('pauseOverlay'), result: $('resultOverlay'),
     resultTitle: $('resultTitle'), resultEyebrow: $('resultEyebrow'), resultDesc: $('resultDesc'), resultScore: $('resultScore'),
-    touchBomb: $('touchBomb'), touchPause: $('touchPause')
+    touchBomb: $('touchBomb'), touchPause: $('touchPause'),
+    radio: $('radioStrip'), radioSpeaker: $('radioSpeaker'), radioText: $('radioText'),
+    bossPortrait: $('bossPortrait'), bossName: $('bossName'), bossIntel: $('bossIntel'),
+    bossDialogue: $('bossDialogue'), bossHealth: $('bossHealth'), missionProgress: $('missionProgress')
   };
 
   const assetFiles = {
@@ -87,6 +90,7 @@
     state.keys = {};
     state.touchActive = false;
     state.pointerId = null;
+    state.mouseActive = false;
   }
 
   const state = {
@@ -109,6 +113,9 @@
     pickups: [],
     keys: {},
     touchActive: false,
+    mouseActive: false,
+    radioTime: 0, radioPriority: 0, radioCooldown: 0,
+    briefingSent: false,
     pointerId: null,
     touchX: W/2,
     touchY: H*0.82,
@@ -122,15 +129,60 @@
     {name:'CONVOY BREAKER', bg:'bg_1', duration:30, scroll:140, boss:'boss_1', waves:['sweep','column','ships','sweep','bomber']},
     {name:'ISLAND SIEGE', bg:'bg_2', duration:32, scroll:150, boss:'boss_3', waves:['zigzag','spread','sweep','bomber','ships']},
     {name:'HARBOR INFERNO', bg:'bg_3', duration:34, scroll:155, boss:'boss_2', waves:['ships','spread','zigzag','ships','bomber']},
-    {name:'ARCTIC STORM', bg:'bg_4', duration:36, scroll:165, boss:'boss_1', waves:['zigzag','column','spread','bomber','ships']},
+    {name:'ARCTIC STORM', bg:'bg_4', duration:36, scroll:165, boss:'boss_5', waves:['zigzag','column','spread','bomber','ships']},
     {name:'FORTRESS OF TIME', bg:'bg_5', duration:38, scroll:175, boss:'boss_4', waves:['spread','ships','sweep','bomber','zigzag']},
   ];
+
+  // Local, event-driven copilot: no network requests or external AI service.
+  const BOSS_INTEL = {
+    boss_1: {name:'철갑 제독 · IRON ADMIRAL', sprite:'boss_1', tactic:'9연장 부채꼴 포격. 탄 사이의 틈을 따라 이동하십시오.', intro:'정체불명의 전투기, 이 해역은 통과시킬 수 없다!', rage:'모든 주포 개방! 하늘까지 불태워라!', defeat:'미래의 기술… 이런 전력은 보고에 없었다.'},
+    boss_3: {name:'섬 요새 · ISLAND BASTION', sprite:'boss_3', tactic:'회전 원형탄. 빈 공간을 찾아 크게 우회하십시오.', intro:'섬 전체가 우리의 포대다. 도망갈 하늘은 없다!', rage:'방공망 2단계! 모든 방향을 봉쇄하라!', defeat:'방공망 붕괴… 섬을 내주다니…'},
+    boss_2: {name:'군항 항모 · BLACK HARBOR', sprite:'boss_2', tactic:'수직 확산탄과 함재기. 증원기를 먼저 정리하십시오.', intro:'전 함재기 출격! 저 한 대를 포위하라!', rage:'예비 편대까지 투입한다! 항모를 지켜라!', defeat:'전 비행갑판 침묵… 군항이 뚫렸다.'},
+    boss_5: {name:'극지 비행요새 · WHITE RAVEN', sprite:'enemy_b3', tactic:'좌우 교차 조준탄. 발사 직후 반대쪽으로 이동하십시오.', intro:'눈보라 속의 방문객이군. 이곳이 네 종착지다!', rage:'극지 편대, 호위 개시! 교차 사격으로 몰아라!', defeat:'우리보다 높은 하늘이… 존재했군.'},
+    boss_4: {name:'최종 기함 · CHRONO FLAGSHIP', sprite:'boss_4', tactic:'이중 조준 확산탄. 한쪽으로 유도한 뒤 빠져나오십시오.', intro:'2045에서 왔다고? 시간을 지배할 자는 나다!', rage:'최종 방어선 해제! 모든 화력을 집중하라!', defeat:'역사의 흐름이… 바뀌고 있다…'}
+  };
+
+  function announce(text, {speaker='ASTER · AI COPILOT', priority=1, duration=5}={}) {
+    if (state.radioTime > 0 && priority < state.radioPriority) return;
+    if (priority === 0 && state.radioCooldown > 0) return;
+    state.radioTime = duration; state.radioPriority = priority; state.radioCooldown = 7;
+    ui.radioSpeaker.textContent = speaker; ui.radioText.textContent = text;
+    ui.radio.dataset.speaker = speaker.includes('COPILOT') ? 'copilot' : 'boss';
+    ui.radio.classList.remove('hidden');
+  }
+
+  function updateIntel() {
+    const key = currentStage().boss, intel = BOSS_INTEL[key];
+    ui.bossPortrait.src = assetFiles.sprites[intel.sprite];
+    ui.bossPortrait.alt = intel.name;
+    ui.bossName.textContent = intel.name;
+    ui.bossIntel.textContent = intel.tactic;
+    ui.bossDialogue.textContent = state.boss ? intel.intro : '적 지휘부 감청 대기 중';
+    ui.bossHealth.value = 100;
+    ui.missionProgress.value = 0;
+  }
+
+  function stageBriefing() {
+    state.radioTime = 0;
+    state.briefingSent = false;
+    updateIntel();
+    announce(`제${state.stage} 전장 진입. ${BOSS_INTEL[currentStage().boss].tactic}`, {priority:2, duration:6});
+  }
+
+  function updateRadio(dt) {
+    state.radioTime = Math.max(0, state.radioTime-dt);
+    state.radioCooldown = Math.max(0, state.radioCooldown-dt);
+    if (state.radioTime === 0) ui.radio.classList.add('hidden');
+    ui.missionProgress.value = Math.min(100, state.stageTimer/currentStage().duration*100);
+    if (state.boss) ui.bossHealth.value = Math.max(0, state.boss.hp/state.boss.maxHp*100);
+  }
 
   function resetGame(){
     clearInput();
     state.score=0; state.stage=1; state.globalTimer=0; state.cameraY=0; state.clearTimer=0; state.mode='playing';
     state.enemies=[]; state.pBullets=[]; state.eBullets=[]; state.particles=[]; state.pickups=[]; state.boss=null; state.bossSpawned=false; state.shake=0; state.spawnIndex=0; state.stageTimer=0; state.bossIntro=0;
-    createPlayer(); updateHud(); ui.status.textContent='SORTIE IN PROGRESS';
+    state.radioTime=0; state.radioCooldown=0; state.radioPriority=0;
+    createPlayer(); updateHud(); stageBriefing(); ui.status.textContent='SORTIE IN PROGRESS';
     ui.menu.classList.add('hidden'); ui.pause.classList.add('hidden'); ui.result.classList.add('hidden'); ui.help.classList.add('hidden');
     ui.touchBomb.classList.remove('hidden'); ui.touchPause.classList.remove('hidden');
   }
@@ -176,6 +228,7 @@
   function playerBomb() {
     const p = state.player;
     if (state.mode !== 'playing' || state.clearTimer > 0 || !p || p.bombs <= 0 || p.bombWave > 0) return;
+    announce('폭탄 전개. 적탄 소거 및 광역 타격을 실행합니다.', {priority:1});
     p.bombs--; p.bombWave = 1.2; p.invuln = Math.max(p.invuln, 1.2); state.eBullets.length = 0;
     state.shake = 14; addScore(250);
     for (const enemy of state.enemies) enemy.hp -= 18;
@@ -193,6 +246,7 @@
     audio.tone(180, 0.25, 'sawtooth', 0.05);
     if (p.lives <= 0) { updateHud(); endGame(false); return; }
     p.x = W/2; p.y = H*0.86; updateHud();
+    announce(p.lives === 1 ? '기체 손상 심각! 마지막 라이프입니다. 위험할 때 폭탄을 사용하십시오.' : '피격 감지. 일시 무적 활성화, 전열을 재정비하십시오.', {priority:3});
   }
 
   function applyPickup(kind) {
@@ -201,6 +255,7 @@
     else if (kind === 'repair') p.lives = Math.min(5, p.lives+1);
     else if (kind === 'bomb') p.bombs = Math.min(5, p.bombs+1);
     else if (kind === 'shield') p.shield = 6;
+    announce(({power:'화력 강화 완료. 확산 사격으로 편대를 제압하십시오.', repair:'기체 수리 완료. 라이프를 회복했습니다.', bomb:'폭탄 보급 확보. 위급할 때 클릭 또는 X를 누르십시오.', shield:'보호막 가동. 6초간 적탄을 차단합니다.'})[kind], {priority:0});
     addScore(180); audio.tone(880,0.10,'triangle',0.03); updateHud();
   }
 
@@ -256,6 +311,7 @@
       boss_1:{w:170,h:310,hp:160, speed:65, pattern:'dreadnought', score:2800},
       boss_2:{w:210,h:320,hp:220, speed:50, pattern:'carrier', score:3600},
       boss_3:{w:190,h:270,hp:200, speed:80, pattern:'fortress', score:3400},
+      boss_5:{w:260,h:180,hp:260, speed:95, pattern:'crossfire', score:4400},
       boss_4:{w:180,h:330,hp:320, speed:88, pattern:'chrono', score:5600}
     };
     return map[key];
@@ -270,6 +326,9 @@
     state.enemies = state.enemies.filter(e => !e.type.startsWith('enemy_ship'));
     state.eBullets.length = 0;
     ui.status.textContent = `${stage.name} — BOSS APPROACHING`;
+    const intel = BOSS_INTEL[stage.boss];
+    ui.bossDialogue.textContent = intel.intro;
+    announce(intel.intro, {speaker:intel.name, priority:3, duration:5});
     state.bossIntro = 3.0;
     audio.tone(140,0.30,'triangle',0.04); audio.tone(95,0.45,'sawtooth',0.03);
   }
@@ -313,6 +372,16 @@
       }
       b.phase += .3;
       b.fire = 1.25;
+    } else if (p === 'crossfire') {
+      for (const side of [-1,1]) {
+        const x = b.x+side*85;
+        const aim = Math.atan2(state.player.y-b.y, state.player.x-x);
+        for (let i=-2;i<=2;i++) {
+          const a = aim+i*.18;
+          state.eBullets.push({x,y:b.y+45,vx:Math.cos(a)*185,vy:Math.sin(a)*185,sprite:'bullet_enemy_needle2',r:11,damage:1});
+        }
+      }
+      b.fire = 1.05;
     } else if (p === 'chrono') {
       const angle0 = Math.atan2(state.player.y-b.y,state.player.x-b.x);
       for (let ring=0; ring<2; ring++) {
@@ -325,6 +394,7 @@
       state.eBullets.push({x:b.x+52,y:b.y+70,vx:70,vy:215,sprite:'bullet_enemy_needle2',r:14,damage:1});
       b.fire = .55;
     }
+    if (b.enraged) b.fire *= .74;
     state.shake = Math.max(state.shake, 4);
   }
 
@@ -335,7 +405,7 @@
     if (state.keys['ArrowRight']||state.keys['d']) mx += 1;
     if (state.keys['ArrowUp']||state.keys['w']) my -= 1;
     if (state.keys['ArrowDown']||state.keys['s']) my += 1;
-    if (state.touchActive) {
+    if (state.touchActive || state.mouseActive) {
       p.x += (state.touchX - p.x) * clamp(dt*10, 0, 1);
       p.y += (state.touchY - p.y) * clamp(dt*10, 0, 1);
     } else {
@@ -343,6 +413,7 @@
       p.x += (mx/len) * p.speed * dt;
       p.y += (my/len) * p.speed * dt;
     }
+    p.bank = mx || ((state.touchActive || state.mouseActive) ? Math.sign(state.touchX-p.x) : 0);
     p.x = clamp(p.x, 34, W-34);
     p.y = clamp(p.y, 80, H-44);
     p.fireCooldown -= dt; if (p.fireCooldown < 0) p.fireCooldown = 0;
@@ -385,11 +456,20 @@
       addScore(b.score);
       state.particles.push({type:'explode',x:b.x,y:b.y,size:'boss',t:0,life:1.3});
       state.shake = 18;
+      const intel = BOSS_INTEL[b.key];
+      ui.bossDialogue.textContent = intel.defeat; ui.bossHealth.value = 0;
+      announce(`제${state.stage} 전장 확보. ` + (state.stage < STAGES.length ? '다음 전장으로 항로를 설정합니다.' : '모든 전장을 장악했습니다. 임무 완료.'), {priority:4, duration:4});
       state.boss = null; state.bossIntro = 0; state.clearTimer = 3.3;
       state.eBullets.length = 0; state.enemies.length = 0;
       ui.status.textContent = `STAGE ${state.stage} CLEAR`;
       audio.tone(660,0.25,'triangle',0.06); audio.tone(880,0.35,'square',0.03);
       return;
+    }
+    if (!b.enraged && b.hp <= b.maxHp*.5) {
+      b.enraged = true;
+      const intel = BOSS_INTEL[b.key]; ui.bossDialogue.textContent = intel.rage;
+      announce(`${intel.rage} / 적 화력 상승, ${intel.tactic}`, {speaker:intel.name, priority:3, duration:6});
+      if (b.pattern === 'crossfire') for (const side of [-1,1]) spawnEnemy('enemy_f8', clamp(b.x+side*125,45,W-45), b.y, {vy:155, pattern:'burst'});
     }
     if (b.enter) {
       b.y += 80*dt; if (b.y > 170) { b.enter = false; b.phase = 0; }
@@ -457,11 +537,15 @@
         state.eBullets.length=0; state.enemies.length=0;
         state.pBullets.length=0; state.pickups.length=0;
         ui.status.textContent = `${currentStage().name} — INCOMING`;
-        updateHud();
+        updateHud(); stageBriefing();
       }
       return;
     }
     state.stageTimer += dt;
+    if (!state.briefingSent && state.stageTimer >= stage.duration-7 && !state.bossSpawned) {
+      state.briefingSent = true;
+      announce('대형 적 반응 접근 중. ' + BOSS_INTEL[stage.boss].tactic, {priority:2, duration:6});
+    }
 
     if (!state.boss) {
       const every = Math.max(2.2 - state.stage*0.1, 1.35);
@@ -483,6 +567,7 @@
     ui.resultDesc.textContent = win ? '2045의 전투기는 1945년의 전장을 장악했다.' : '시간의 전장에서 격추되었습니다.';
     ui.resultScore.textContent = String(state.score).padStart(8,'0');
     ui.status.textContent = win ? 'MISSION COMPLETE' : 'GAME OVER';
+    ui.radio.classList.add('hidden');
   }
 
   function pauseGame(){ if (state.mode !== 'playing') return; clearInput(); state.mode = 'pause'; ui.pause.classList.remove('hidden'); ui.status.textContent='PAUSED'; }
@@ -499,13 +584,13 @@
     const scale = W / img.width;
     const tileH = img.height * scale;
     const offset = state.cameraY % tileH;
-    for (let y = -offset; y < H; y += tileH) ctx.drawImage(img, 0, y, W, tileH);
+    for (let y = offset-tileH; y < H; y += tileH) ctx.drawImage(img, 0, y, W, tileH);
     const grd = ctx.createLinearGradient(0,0,0,H); grd.addColorStop(0,'rgba(0,0,0,.05)'); grd.addColorStop(1,'rgba(0,0,0,.2)'); ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
   }
 
   function drawPlayer(){
     const p = state.player; if (!p) return;
-    const key = p.invuln>0 && Math.floor(p.invuln*10)%2===0 ? 'player_damaged' : state.touchActive ? 'player_boost' : (state.keys['ArrowLeft']||state.keys['a']) ? 'player_bank_left' : (state.keys['ArrowRight']||state.keys['d']) ? 'player_bank_right' : 'player_straight';
+    const key = p.invuln>0 && Math.floor(p.invuln*10)%2===0 ? 'player_damaged' : p.bank < 0 ? 'player_bank_left' : p.bank > 0 ? 'player_bank_right' : 'player_straight';
     drawSprite(key,p.x,p.y,p.w,p.h,p.invuln>0&&Math.floor(p.invuln*20)%2===0?0.45:1);
     if (p.shield>0) {
       ctx.save(); ctx.strokeStyle='rgba(100,200,255,.8)'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(p.x,p.y,34+Math.sin(state.globalTimer*10)*2,0,Math.PI*2); ctx.stroke(); ctx.restore();
@@ -527,10 +612,10 @@
   function drawEnemies() {
     for (const e of state.enemies) drawSprite(e.type,e.x,e.y,e.w,e.h);
     if (state.boss) {
-      drawSprite(state.boss.key, state.boss.x, state.boss.y, state.boss.w, state.boss.h);
+      drawSprite(BOSS_INTEL[state.boss.key].sprite, state.boss.x, state.boss.y, state.boss.w, state.boss.h);
       const barW = 300, barH = 14, x=(W-barW)/2, y=22;
       ctx.fillStyle='rgba(0,0,0,.45)'; ctx.fillRect(x,y,barW,barH);
-      ctx.fillStyle='rgba(255,74,74,.92)'; ctx.fillRect(x,y,barW*(state.boss.hp/state.boss.maxHp),barH);
+      ctx.fillStyle='rgba(255,74,74,.92)'; ctx.fillRect(x,y,barW*clamp(state.boss.hp/state.boss.maxHp,0,1),barH);
       ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.strokeRect(x,y,barW,barH);
       ctx.fillStyle='#fff'; ctx.font='12px system-ui'; ctx.fillText('BOSS',x-46,y+11);
     }
@@ -578,7 +663,7 @@
         updatePickups(dt); updateParticles(dt); updateStage(dt);
         if (state.mode === 'playing') handleCollisions();
       }
-      updateHud();
+      updateHud(); updateRadio(dt);
     }
     draw(); requestAnimationFrame(loop);
   }
@@ -588,14 +673,35 @@
     state.touchX = clamp((ev.clientX-r.left)/r.width*W, 30, W-30);
     state.touchY = clamp((ev.clientY-r.top)/r.height*H, 60, H-30);
   }
+  canvas.addEventListener('pointerenter', ev => {
+    if (ev.pointerType === 'mouse' && state.mode === 'playing') {
+      state.mouseActive = true; onPointerMove(ev);
+    }
+  });
   canvas.addEventListener('pointerdown', ev => {
     if (state.mode !== 'playing') return;
-    state.touchActive = true; state.pointerId = ev.pointerId; canvas.setPointerCapture?.(ev.pointerId); onPointerMove(ev);
+    if (ev.pointerType === 'mouse') {
+      state.mouseActive = true; onPointerMove(ev);
+      if (ev.button === 0) playerBomb();
+      return;
+    }
+    if (state.pointerId !== null) return;
+    state.mouseActive = false;
+    state.touchActive = true; state.pointerId = ev.pointerId;
+    canvas.setPointerCapture?.(ev.pointerId); onPointerMove(ev);
   });
-  canvas.addEventListener('pointermove', ev => { if (state.touchActive && ev.pointerId === state.pointerId) onPointerMove(ev); });
-  canvas.addEventListener('pointerup', ev => { if (ev.pointerId===state.pointerId) state.touchActive = false; });
-  canvas.addEventListener('pointercancel', ev => { if (ev.pointerId === state.pointerId) clearInput(); });
-  canvas.addEventListener('lostpointercapture', ev => { if (ev.pointerId === state.pointerId) clearInput(); });
+  canvas.addEventListener('pointermove', ev => {
+    if (state.mode !== 'playing') return;
+    if (ev.pointerType === 'mouse') { state.mouseActive = true; onPointerMove(ev); }
+    else if (state.touchActive && ev.pointerId === state.pointerId) onPointerMove(ev);
+  });
+  canvas.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse') state.mouseActive = false; });
+  function releasePointer(ev) {
+    if (ev.pointerId === state.pointerId) { state.touchActive = false; state.pointerId = null; }
+  }
+  canvas.addEventListener('pointerup', releasePointer);
+  canvas.addEventListener('pointercancel', releasePointer);
+  canvas.addEventListener('lostpointercapture', releasePointer);
   window.addEventListener('blur', () => { clearInput(); pauseGame(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { clearInput(); pauseGame(); } });
 
@@ -604,6 +710,7 @@
     if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(k) && state.mode === 'playing') ev.preventDefault();
     if (ev.repeat && ['x','b','p','Escape'].includes(k)) return;
     state.keys[k]=true;
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','w','a','s','d'].includes(k)) state.mouseActive = false;
     if ((k==='x'||k==='b') && state.mode==='playing') playerBomb();
     if ((k==='p'||k==='Escape') && state.mode==='playing') pauseGame(); else if ((k==='p'||k==='Escape') && state.mode==='pause') resumeGame();
   });
@@ -613,9 +720,9 @@
   $('helpBtn').addEventListener('click', ()=> ui.help.classList.remove('hidden'));
   $('helpClose').addEventListener('click', ()=> ui.help.classList.add('hidden'));
   $('resumeBtn').addEventListener('click', resumeGame);
-  $('backMenuBtn').addEventListener('click', ()=> { state.mode='menu'; ui.pause.classList.add('hidden'); ui.menu.classList.remove('hidden'); ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden'); ui.status.textContent='MISSION READY'; });
+  $('backMenuBtn').addEventListener('click', ()=> { clearInput(); ui.radio.classList.add('hidden'); state.mode='menu'; ui.pause.classList.add('hidden'); ui.menu.classList.remove('hidden'); ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden'); ui.status.textContent='MISSION READY'; });
   $('retryBtn').addEventListener('click', resetGame);
-  $('menuBtn').addEventListener('click', ()=> { state.mode='menu'; ui.result.classList.add('hidden'); ui.menu.classList.remove('hidden'); ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden'); ui.status.textContent='MISSION READY'; });
+  $('menuBtn').addEventListener('click', ()=> { clearInput(); ui.radio.classList.add('hidden'); state.mode='menu'; ui.result.classList.add('hidden'); ui.menu.classList.remove('hidden'); ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden'); ui.status.textContent='MISSION READY'; });
   $('soundBtn').addEventListener('click', ()=> { audio.enabled = !audio.enabled; $('soundBtn').textContent = audio.enabled ? '🔊 사운드' : '🔇 사운드'; });
   $('fullBtn').addEventListener('click', async () => {
     try {
@@ -628,6 +735,7 @@
   ui.touchBomb.addEventListener('click', playerBomb);
   ui.touchPause.addEventListener('click', pauseGame);
 
+  updateIntel();
   updateHud(); ui.best.textContent = String(state.best).padStart(8,'0');
   loadAssets().then(()=> { state.canStart = true; ui.loading.textContent = '에셋 로딩 완료 — 출격 가능'; }).catch(err => { ui.loading.textContent = '에셋 로딩 실패'; console.error(err); });
   requestAnimationFrame(loop);

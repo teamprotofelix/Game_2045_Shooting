@@ -36,3 +36,18 @@
 ## 참고
 - 본 패키지는 정적 사이트에서 바로 실행되도록 작성되었습니다.
 - 이미지 자산은 고화질 생성 이미지를 기반으로 정리한 WebP 에셋입니다.
+
+## v2.2 안정화
+- 보스 중복 생성 방지, 5개 스테이지 전환 및 최종 승리 처리 수정
+- 라이프 0에서 즉시 종료, 클리어 연출 중 피격 방지
+- 폭탄의 보스 피해 적용 및 일시정지 중 사용 차단
+- 창 전환 시 자동 일시정지와 입력 해제, 모바일 드래그 스크롤 방지
+- 저장소·오디오·전체화면을 사용할 수 없는 브라우저에서 오류 처리
+
+## 개발 검증
+Node.js 22 이상에서 `node --check game.js` 및 `node --test tests/game.test.cjs`를 실행합니다.
+브라우저 검사는 Playwright 1.62.1과 Chromium 설치 후, 저장소 루트에서 `python3 -m http.server 8765`로 서버를 열고 `node tests/browser.cjs`를 실행합니다.
+GitHub Actions는 PR과 main 변경 시 동일한 검사를 실행합니다. 실제 Android/iOS 기기의 터치·오디오·전체화면은 별도 확인이 필요합니다.
+
+## 공개 전환 점검
+점검 범위와 남은 개인정보 항목은 [PUBLIC_RELEASE_REVIEW.md](PUBLIC_RELEASE_REVIEW.md)를 확인하십시오.

@@ -66,22 +66,39 @@
     ctx: null,
     tone(freq=440, dur=0.08, type='sine', volume=0.03){
       if (!this.enabled) return;
-      if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
+      try {
+        if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
       const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.ctx.createGain();
       o.type=type; o.frequency.setValueAtTime(freq,t); g.gain.setValueAtTime(volume,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
       o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t+dur);
+      } catch { this.enabled = false; }
     }
   };
+
+  function readBestScore() {
+    try {
+      const value = Number(localStorage.getItem('chrono_striker_best'));
+      return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    } catch { return 0; }
+  }
+
+  function clearInput() {
+    state.keys = {};
+    state.touchActive = false;
+    state.pointerId = null;
+  }
 
   const state = {
     mode: 'menu',
     score: 0,
-    best: Number(localStorage.getItem('chrono_striker_best') || 0),
+    best: readBestScore(),
     stage: 1,
     stageTimer: 0,
     globalTimer: 0,
     cameraY: 0,
     boss: null,
+    bossSpawned: false,
     bossIntro: 0,
     clearTimer: 0,
     player: null,
@@ -110,8 +127,9 @@
   ];
 
   function resetGame(){
+    clearInput();
     state.score=0; state.stage=1; state.globalTimer=0; state.cameraY=0; state.clearTimer=0; state.mode='playing';
-    state.enemies=[]; state.pBullets=[]; state.eBullets=[]; state.particles=[]; state.pickups=[]; state.boss=null; state.spawnIndex=0; state.stageTimer=0; state.bossIntro=0;
+    state.enemies=[]; state.pBullets=[]; state.eBullets=[]; state.particles=[]; state.pickups=[]; state.boss=null; state.bossSpawned=false; state.shake=0; state.spawnIndex=0; state.stageTimer=0; state.bossIntro=0;
     createPlayer(); updateHud(); ui.status.textContent='SORTIE IN PROGRESS';
     ui.menu.classList.add('hidden'); ui.pause.classList.add('hidden'); ui.result.classList.add('hidden'); ui.help.classList.add('hidden');
     ui.touchBomb.classList.remove('hidden'); ui.touchPause.classList.remove('hidden');
@@ -126,7 +144,7 @@
 
   function currentStage(){ return STAGES[state.stage-1]; }
 
-  function addScore(v){ state.score += v; if (state.score > state.best) { state.best = state.score; localStorage.setItem('chrono_striker_best', state.best); } updateHud(); }
+  function addScore(v){ state.score += v; if (state.score > state.best) { state.best = state.score; try { localStorage.setItem('chrono_striker_best', String(state.best)); } catch { /* Storage is optional. */ } } updateHud(); }
   function updateHud(){
     ui.score.textContent = String(state.score).padStart(8,'0');
     ui.best.textContent = String(state.best).padStart(8,'0');
@@ -157,10 +175,11 @@
 
   function playerBomb() {
     const p = state.player;
-    if (!p || p.bombs <= 0 || p.bombWave > 0) return;
+    if (state.mode !== 'playing' || state.clearTimer > 0 || !p || p.bombs <= 0 || p.bombWave > 0) return;
     p.bombs--; p.bombWave = 1.2; p.invuln = Math.max(p.invuln, 1.2); state.eBullets.length = 0;
     state.shake = 14; addScore(250);
     for (const enemy of state.enemies) enemy.hp -= 18;
+    if (state.boss) state.boss.hp -= 18;
     state.particles.push({type:'bomb', x:p.x, y:p.y, t:0, life:0.8});
     audio.tone(120,0.18,'sawtooth',0.05); audio.tone(80,0.35,'triangle',0.03);
     updateHud();
@@ -168,11 +187,11 @@
 
   function hurtPlayer() {
     const p = state.player;
-    if (!p || p.invuln > 0 || p.shield > 0) return;
+    if (state.mode !== 'playing' || state.clearTimer > 0 || !p || p.invuln > 0 || p.shield > 0) return;
     p.lives--; p.invuln = 2.5; p.power = Math.max(1, p.power-1); p.flash = .5; state.shake = 12;
     state.particles.push({type:'explode', x:p.x, y:p.y, size:'big', t:0, life:.85});
     audio.tone(180, 0.25, 'sawtooth', 0.05);
-    if (p.lives < 0) { endGame(false); return; }
+    if (p.lives <= 0) { updateHud(); endGame(false); return; }
     p.x = W/2; p.y = H*0.86; updateHud();
   }
 
@@ -243,6 +262,8 @@
   }
 
   function spawnBoss() {
+    if (state.bossSpawned || state.clearTimer > 0) return;
+    state.bossSpawned = true;
     const stage = currentStage();
     const t = bossTemplate(stage.boss);
     state.boss = { ...t, key:stage.boss, x:W/2, y:-t.h/2, tx:W/2, enter:true, fire:.8, phase:0, r:68, maxHp:t.hp };
@@ -360,6 +381,16 @@
 
   function updateBoss(dt){
     const b = state.boss; if (!b) return;
+    if (b.hp <= 0) {
+      addScore(b.score);
+      state.particles.push({type:'explode',x:b.x,y:b.y,size:'boss',t:0,life:1.3});
+      state.shake = 18;
+      state.boss = null; state.bossIntro = 0; state.clearTimer = 3.3;
+      state.eBullets.length = 0; state.enemies.length = 0;
+      ui.status.textContent = `STAGE ${state.stage} CLEAR`;
+      audio.tone(660,0.25,'triangle',0.06); audio.tone(880,0.35,'square',0.03);
+      return;
+    }
     if (b.enter) {
       b.y += 80*dt; if (b.y > 170) { b.enter = false; b.phase = 0; }
       return;
@@ -369,10 +400,6 @@
     if (b.pattern === 'chrono') b.x = W/2 + Math.sin(b.phase*1.35) * 130;
     bossFire(b,dt);
     if (circleHit(b,state.player)) hurtPlayer();
-    if (b.hp <= 0) {
-      addScore(b.score); state.particles.push({type:'explode',x:b.x,y:b.y,size:'boss',t:0,life:1.3}); state.shake = 18;
-      state.boss = null; state.clearTimer = 3.3; ui.status.textContent = `STAGE ${state.stage} CLEAR`; audio.tone(660,0.25,'triangle',0.06); audio.tone(880,0.35,'square',0.03);
-    }
   }
 
   function updatePickups(dt){
@@ -419,7 +446,22 @@
     const p = state.player; if (!p) return;
     const stage = currentStage();
     state.cameraY += stage.scroll * dt;
-    state.stageTimer += dt; state.globalTimer += dt;
+    state.globalTimer += dt;
+    state.bossIntro = Math.max(0, state.bossIntro - dt);
+    if (state.clearTimer > 0) {
+      state.clearTimer = Math.max(0, state.clearTimer - dt);
+      if (state.clearTimer === 0) {
+        if (state.stage >= STAGES.length) { endGame(true); return; }
+        state.stage++; state.stageTimer=0; state.spawnIndex=0;
+        state.bossSpawned=false; state.bossIntro=0;
+        state.eBullets.length=0; state.enemies.length=0;
+        state.pBullets.length=0; state.pickups.length=0;
+        ui.status.textContent = `${currentStage().name} — INCOMING`;
+        updateHud();
+      }
+      return;
+    }
+    state.stageTimer += dt;
 
     if (!state.boss) {
       const every = Math.max(2.2 - state.stage*0.1, 1.35);
@@ -427,21 +469,12 @@
         const wave = stage.waves[state.spawnIndex % stage.waves.length];
         spawnWave(wave); state.spawnIndex++;
       }
-      if (state.stageTimer >= stage.duration && !state.boss) spawnBoss();
+      if (state.stageTimer >= stage.duration && !state.bossSpawned) spawnBoss();
     } else updateBoss(dt);
-
-    if (state.clearTimer > 0) {
-      state.clearTimer -= dt;
-      if (state.clearTimer <= 0) {
-        if (state.stage >= STAGES.length) endGame(true);
-        else {
-          state.stage++; state.stageTimer = 0; state.spawnIndex = 0; state.eBullets.length = 0; state.enemies.length = 0; ui.status.textContent = `${currentStage().name} — INCOMING`; updateHud();
-        }
-      }
-    }
   }
 
   function endGame(win) {
+    clearInput();
     state.mode = 'result';
     ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden');
     ui.result.classList.remove('hidden'); ui.pause.classList.add('hidden');
@@ -452,7 +485,7 @@
     ui.status.textContent = win ? 'MISSION COMPLETE' : 'GAME OVER';
   }
 
-  function pauseGame(){ if (state.mode !== 'playing') return; state.mode = 'pause'; ui.pause.classList.remove('hidden'); ui.status.textContent='PAUSED'; }
+  function pauseGame(){ if (state.mode !== 'playing') return; clearInput(); state.mode = 'pause'; ui.pause.classList.remove('hidden'); ui.status.textContent='PAUSED'; }
   function resumeGame(){ if (state.mode !== 'pause') return; state.mode = 'playing'; ui.pause.classList.add('hidden'); ui.status.textContent='SORTIE IN PROGRESS'; }
 
   function drawSprite(name,x,y,w,h,alpha=1){
@@ -526,7 +559,6 @@
   function drawStageMessage() {
     if (state.bossIntro > 0) {
       ctx.save(); ctx.globalAlpha = Math.min(1, state.bossIntro/1.6); ctx.fillStyle='rgba(0,0,0,.42)'; ctx.fillRect(30,H/2-72,W-60,84); ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='bold 22px system-ui'; ctx.fillText('WARNING — BOSS APPROACHING', W/2, H/2-24); ctx.font='14px system-ui'; ctx.fillText(currentStage().name, W/2, H/2+8); ctx.restore();
-      state.bossIntro = Math.max(0, state.bossIntro - 1/60);
     }
   }
 
@@ -541,7 +573,12 @@
   function loop(now){
     const dt = Math.min(0.033, (now-last)/1000); last=now;
     if (state.mode === 'playing') {
-      updatePlayer(dt); updateBullets(state.pBullets,dt); updateBullets(state.eBullets,dt); updateEnemies(dt); updatePickups(dt); updateParticles(dt); updateStage(dt); handleCollisions(); updateHud();
+      updatePlayer(dt); updateBullets(state.pBullets,dt); updateBullets(state.eBullets,dt); updateEnemies(dt);
+      if (state.mode === 'playing') {
+        updatePickups(dt); updateParticles(dt); updateStage(dt);
+        if (state.mode === 'playing') handleCollisions();
+      }
+      updateHud();
     }
     draw(); requestAnimationFrame(loop);
   }
@@ -555,12 +592,18 @@
     if (state.mode !== 'playing') return;
     state.touchActive = true; state.pointerId = ev.pointerId; canvas.setPointerCapture?.(ev.pointerId); onPointerMove(ev);
   });
-  canvas.addEventListener('pointermove', ev => { if (state.touchActive) onPointerMove(ev); });
+  canvas.addEventListener('pointermove', ev => { if (state.touchActive && ev.pointerId === state.pointerId) onPointerMove(ev); });
   canvas.addEventListener('pointerup', ev => { if (ev.pointerId===state.pointerId) state.touchActive = false; });
-  canvas.addEventListener('pointercancel', ()=> state.touchActive=false);
+  canvas.addEventListener('pointercancel', ev => { if (ev.pointerId === state.pointerId) clearInput(); });
+  canvas.addEventListener('lostpointercapture', ev => { if (ev.pointerId === state.pointerId) clearInput(); });
+  window.addEventListener('blur', () => { clearInput(); pauseGame(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { clearInput(); pauseGame(); } });
 
   window.addEventListener('keydown', ev => {
-    const k = ev.key.length===1 ? ev.key.toLowerCase() : ev.key; state.keys[k]=true;
+    const k = ev.key.length===1 ? ev.key.toLowerCase() : ev.key;
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(k) && state.mode === 'playing') ev.preventDefault();
+    if (ev.repeat && ['x','b','p','Escape'].includes(k)) return;
+    state.keys[k]=true;
     if ((k==='x'||k==='b') && state.mode==='playing') playerBomb();
     if ((k==='p'||k==='Escape') && state.mode==='playing') pauseGame(); else if ((k==='p'||k==='Escape') && state.mode==='pause') resumeGame();
   });
@@ -574,7 +617,14 @@
   $('retryBtn').addEventListener('click', resetGame);
   $('menuBtn').addEventListener('click', ()=> { state.mode='menu'; ui.result.classList.add('hidden'); ui.menu.classList.remove('hidden'); ui.touchBomb.classList.add('hidden'); ui.touchPause.classList.add('hidden'); ui.status.textContent='MISSION READY'; });
   $('soundBtn').addEventListener('click', ()=> { audio.enabled = !audio.enabled; $('soundBtn').textContent = audio.enabled ? '🔊 사운드' : '🔇 사운드'; });
-  $('fullBtn').addEventListener('click', ()=> { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); });
+  $('fullBtn').addEventListener('click', async () => {
+    try {
+      if (!document.fullscreenElement) {
+        if (!document.documentElement.requestFullscreen) { ui.status.textContent='이 브라우저는 전체화면을 지원하지 않습니다'; return; }
+        await document.documentElement.requestFullscreen();
+      } else await document.exitFullscreen();
+    } catch { ui.status.textContent='전체화면 전환을 사용할 수 없습니다'; }
+  });
   ui.touchBomb.addEventListener('click', playerBomb);
   ui.touchPause.addEventListener('click', pauseGame);
 
@@ -582,3 +632,4 @@
   loadAssets().then(()=> { state.canStart = true; ui.loading.textContent = '에셋 로딩 완료 — 출격 가능'; }).catch(err => { ui.loading.textContent = '에셋 로딩 실패'; console.error(err); });
   requestAnimationFrame(loop);
 })();
+
